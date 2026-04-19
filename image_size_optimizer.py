@@ -218,7 +218,7 @@ def load_and_preprocess_image(image_path, target_size):
     return img
 
 
-def create_tensorflow_dataset(dataframe, image_size, batch_size, shuffle=True):
+def create_tensorflow_dataset(dataframe, image_size, batch_size, shuffle=True, repeat=False):
     image_paths = dataframe["image_path"].values
     target_values = dataframe[TARGET_COLUMN].values.astype(np.float32)
 
@@ -242,7 +242,10 @@ def create_tensorflow_dataset(dataframe, image_size, batch_size, shuffle=True):
     dataset = tf.data.Dataset.from_generator(generator, output_signature=(image_spec, target_spec))
 
     if shuffle:
-        dataset = dataset.shuffle(buffer_size=len(dataframe), seed=RAND_ST)
+        dataset = dataset.shuffle(buffer_size=256, seed=RAND_ST)
+
+    if repeat:
+        dataset = dataset.repeat()
 
     dataset = dataset.batch(batch_size)
     dataset = dataset.prefetch(tf.data.AUTOTUNE)
@@ -250,9 +253,6 @@ def create_tensorflow_dataset(dataframe, image_size, batch_size, shuffle=True):
     return dataset
 
 
-# =========================================================
-# CNN ARCHITECTURES
-# =========================================================
 def create_small_cnn(learning_rate, dropout_rate, dense_units, input_shape):
     model = models.Sequential([
         Input(shape=input_shape),
@@ -397,9 +397,32 @@ def train_cnn_model(architecture_name, learning_rate, dropout_rate, dense_units,
         save_best_only=True
     )
 
-    train_dataset = create_tensorflow_dataset(train_df, image_size, batch_size, shuffle=True)
-    val_dataset = create_tensorflow_dataset(val_df, image_size, batch_size, shuffle=False)
-    test_dataset = create_tensorflow_dataset(test_df, image_size, batch_size, shuffle=False)
+    train_dataset = create_tensorflow_dataset(
+        train_df,
+        image_size,
+        batch_size,
+        shuffle=True,
+        repeat=True
+    )
+
+    val_dataset = create_tensorflow_dataset(
+        val_df,
+        image_size,
+        batch_size,
+        shuffle=False,
+        repeat=False
+    )
+
+    test_dataset = create_tensorflow_dataset(
+        test_df,
+        image_size,
+        batch_size,
+        shuffle=False,
+        repeat=False
+    )
+
+    train_steps = math.ceil(len(train_df) / batch_size)
+    val_steps = math.ceil(len(val_df) / batch_size)
 
     start_time = time.time()
 
@@ -407,6 +430,8 @@ def train_cnn_model(architecture_name, learning_rate, dropout_rate, dense_units,
         train_dataset,
         validation_data=val_dataset,
         epochs=epochs,
+        steps_per_epoch=train_steps,
+        validation_steps=val_steps,
         callbacks=[early_stopping, reduce_lr, checkpoint],
         verbose=1
     )
@@ -415,9 +440,21 @@ def train_cnn_model(architecture_name, learning_rate, dropout_rate, dense_units,
     training_time_seconds = end_time - start_time
     epochs_trained = len(history.history["loss"])
 
-    train_loss, train_mae = model.evaluate(train_dataset, verbose=0)
-    val_loss, val_mae = model.evaluate(val_dataset, verbose=0)
-    test_loss, test_mae = model.evaluate(test_dataset, verbose=0)
+    train_loss, train_mae = model.evaluate(
+        train_dataset,
+        steps=train_steps,
+        verbose=0
+    )
+
+    val_loss, val_mae = model.evaluate(
+        val_dataset,
+        verbose=0
+    )
+
+    test_loss, test_mae = model.evaluate(
+        test_dataset,
+        verbose=0
+    )
 
     return model, history, train_mae, val_mae, test_mae, train_loss, val_loss, test_loss, training_time_seconds, epochs_trained
 
