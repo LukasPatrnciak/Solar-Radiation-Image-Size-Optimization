@@ -79,6 +79,36 @@ def print_separator(char="=", length=100):
 def safe_rmse(mse_value):
     return float(math.sqrt(float(mse_value)))
 
+
+def sanitize_filename(text):
+    text = str(text).strip().replace(" ", "_")
+
+    allowed_characters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
+    sanitized = ""
+
+    for character in text:
+        if character in allowed_characters:
+            sanitized += character
+        else:
+            sanitized += "_"
+
+    while "__" in sanitized:
+        sanitized = sanitized.replace("__", "_")
+
+    return sanitized.strip("_")
+
+
+def save_current_plot(file_name):
+    os.makedirs(PLOTS_DIR, exist_ok=True)
+
+    if not file_name.lower().endswith(".png"):
+        file_name = file_name + ".png"
+
+    save_path = os.path.join(PLOTS_DIR, file_name)
+    plt.savefig(save_path, dpi=300, bbox_inches="tight")
+    print(f"Saved plot: {save_path}")
+
+
 def analyze_data(dataset_root, target_size):
     sets = os.listdir(dataset_root)
 
@@ -138,6 +168,7 @@ def analyze_data(dataset_root, target_size):
 
             plt.suptitle(f"Sample images - {st}")
             plt.tight_layout()
+            save_current_plot(f"sample_images_{sanitize_filename(st)}.png")
             plt.show()
 
 
@@ -484,7 +515,7 @@ def evaluate_model_original_scale(model, dataframe, image_size, batch_size, targ
     return mse_original, mae_original, rmse_original, y_true, y_pred
 
 
-def plot_training(history, title_prefix=""):
+def plot_training(history, title_prefix="", save_name=None):
     plt.figure(figsize=(12, 6))
 
     plt.subplot(1, 2, 1)
@@ -504,10 +535,14 @@ def plot_training(history, title_prefix=""):
     plt.legend()
 
     plt.tight_layout()
+
+    if save_name is not None:
+        save_current_plot(save_name)
+
     plt.show()
 
 
-def plot_predictions_scatter(y_true, y_pred, title):
+def plot_predictions_scatter(y_true, y_pred, title, save_name=None):
     plt.figure(figsize=(6, 6))
     plt.scatter(y_true, y_pred, alpha=0.5)
     plt.xlabel("True Irradiance")
@@ -519,10 +554,14 @@ def plot_predictions_scatter(y_true, y_pred, title):
     plt.plot([min_val, max_val], [min_val, max_val], linestyle="--")
 
     plt.tight_layout()
+
+    if save_name is not None:
+        save_current_plot(save_name)
+
     plt.show()
 
 
-def plot_metric_vs_image_size(results_df, metric_name, title):
+def plot_metric_vs_image_size(results_df, metric_name, title, save_name=None):
     plt.figure(figsize=(10, 6))
 
     architectures = sorted(results_df["architecture"].unique())
@@ -541,10 +580,14 @@ def plot_metric_vs_image_size(results_df, metric_name, title):
     plt.title(title)
     plt.legend()
     plt.tight_layout()
+
+    if save_name is not None:
+        save_current_plot(save_name)
+
     plt.show()
 
 
-def plot_training_time_vs_image_size(results_df, title):
+def plot_training_time_vs_image_size(results_df, title, save_name=None):
     plt.figure(figsize=(10, 6))
 
     architectures = results_df["architecture"].unique()
@@ -567,6 +610,10 @@ def plot_training_time_vs_image_size(results_df, title):
 
     plt.legend()
     plt.tight_layout()
+
+    if save_name is not None:
+        save_current_plot(save_name)
+
     plt.show()
 
 
@@ -621,7 +668,7 @@ def drop_non_printable_columns(dataframe):
     return dataframe.drop(columns=columns_to_drop)
 
 
-def plot_best_metric_vs_image_size(best_by_size_df, metric_name, title, ylabel):
+def plot_best_metric_vs_image_size(best_by_size_df, metric_name, title, ylabel, save_name=None):
     """
     Plot only the best result for every image size and architecture.
     This avoids plotting all hyperparameter combinations at the same image size.
@@ -644,10 +691,14 @@ def plot_best_metric_vs_image_size(best_by_size_df, metric_name, title, ylabel):
     plt.title(title)
     plt.legend()
     plt.tight_layout()
+
+    if save_name is not None:
+        save_current_plot(save_name)
+
     plt.show()
 
 
-def plot_best_training_time_vs_image_size(best_by_size_df, title):
+def plot_best_training_time_vs_image_size(best_by_size_df, title, save_name=None):
     """
     Plot training time of the best hyperparameter configuration for every image
     size and architecture.
@@ -670,6 +721,10 @@ def plot_best_training_time_vs_image_size(best_by_size_df, title):
     plt.title(title)
     plt.legend()
     plt.tight_layout()
+
+    if save_name is not None:
+        save_current_plot(save_name)
+
     plt.show()
 
 
@@ -942,8 +997,8 @@ final_best_image_size_summary_printable.to_csv(final_summary_save_path, index=Fa
 print_final_best_image_size_summary(final_best_image_size_summary)
 print(f"Saved final best image size summary: {final_summary_save_path}")
 
-plot_training(best_history, title_prefix=f"{best_architecture} ")
-plot_predictions_scatter(best_test_y_true, best_test_y_pred, "Best Model - Test Predictions vs True Irradiance")
+plot_training(best_history, title_prefix=f"{best_architecture} ", save_name="best_model_training_history.png")
+plot_predictions_scatter(best_test_y_true, best_test_y_pred, "Best Model - Test Predictions vs True Irradiance", save_name="best_model_test_predictions_scatter.png")
 
 # Assignment-oriented plots: these show the best achieved error for each image size,
 # not all hyperparameter combinations.
@@ -951,24 +1006,30 @@ plot_best_metric_vs_image_size(
     best_by_size_printable,
     "val_mae_original",
     "Best Validation MAE vs Image Size",
-    "Validation MAE"
+    "Validation MAE",
+    save_name="best_validation_mae_vs_image_size.png"
 )
 
 plot_best_metric_vs_image_size(
     best_by_size_printable,
     "val_rmse_original",
     "Best Validation RMSE vs Image Size",
-    "Validation RMSE"
+    "Validation RMSE",
+    save_name="best_validation_rmse_vs_image_size.png"
 )
 
 plot_best_metric_vs_image_size(
     best_by_size_printable,
     "test_mae_original",
     "Test MAE of Best Validation Models vs Image Size",
-    "Test MAE"
+    "Test MAE",
+    save_name="test_mae_of_best_validation_models_vs_image_size.png"
 )
 
 plot_best_training_time_vs_image_size(
     best_by_size_printable,
-    "Training Time of Best Models vs Image Size"
+    "Training Time of Best Models vs Image Size",
+    save_name="training_time_of_best_models_vs_image_size.png"
 )
+
+print(f"Saved plots directory: {PLOTS_DIR}")
