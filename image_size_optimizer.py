@@ -279,10 +279,11 @@ def create_tensorflow_dataset(dataframe, image_size, batch_size, shuffle=True, r
     if shuffle:
         dataset = dataset.shuffle(buffer_size=256, seed=RAND_ST)
 
+    dataset = dataset.batch(batch_size)
+
     if repeat:
         dataset = dataset.repeat()
 
-    dataset = dataset.batch(batch_size)
     dataset = dataset.prefetch(tf.data.AUTOTUNE)
 
     return dataset
