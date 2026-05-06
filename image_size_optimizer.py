@@ -19,7 +19,6 @@ import numpy as np
 import tensorflow as tf
 import matplotlib.pyplot as plt
 
-from itertools import product
 from keras import Input
 from tensorflow.keras import layers, models
 from tensorflow.keras.optimizers import Adam
@@ -34,11 +33,16 @@ os.environ["OMP_NUM_THREADS"] = "12"
 os.environ["MKL_NUM_THREADS"] = "12"
 os.environ["OPENBLAS_NUM_THREADS"] = "12"
 
-tf.config.threading.set_intra_op_parallelism_threads(8)
-tf.config.threading.set_inter_op_parallelism_threads(8)
+# For GPU training has to be set '0'
+tf.config.threading.set_intra_op_parallelism_threads(0)
+tf.config.threading.set_inter_op_parallelism_threads(0)
 
 print(f"Intra-op parallelism threads: {tf.config.threading.get_intra_op_parallelism_threads()}")
 print(f"Inter-op parallelism threads: {tf.config.threading.get_inter_op_parallelism_threads()}")
+print("TensorFlow version:", tf.__version__)
+print("Built with CUDA:", tf.test.is_built_with_cuda())
+print("Num GPUs Available:", len(tf.config.list_physical_devices('GPU')))
+print(tf.config.list_physical_devices('GPU'))
 
 RAND_ST = 42
 random.seed(RAND_ST)
@@ -56,7 +60,7 @@ IMAGE_COLUMN = "PictureName"
 TARGET_COLUMN = "Irradiance"
 
 NUM_SAMPLES = 5
-MAX_EPOCHS = 50
+MAX_EPOCHS = 30
 
 OUTPUT_DIR = "outputs"
 MODELS_DIR = os.path.join(OUTPUT_DIR, "models")
@@ -78,6 +82,36 @@ def print_separator(char="=", length=100):
 
 def safe_rmse(mse_value):
     return float(math.sqrt(float(mse_value)))
+
+
+def sanitize_filename(text):
+    text = str(text).strip().replace(" ", "_")
+
+    allowed_characters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
+    sanitized = ""
+
+    for character in text:
+        if character in allowed_characters:
+            sanitized += character
+        else:
+            sanitized += "_"
+
+    while "__" in sanitized:
+        sanitized = sanitized.replace("__", "_")
+
+    return sanitized.strip("_")
+
+
+def save_current_plot(file_name):
+    os.makedirs(PLOTS_DIR, exist_ok=True)
+
+    if not file_name.lower().endswith(".png"):
+        file_name = file_name + ".png"
+
+    save_path = os.path.join(PLOTS_DIR, file_name)
+    plt.savefig(save_path, dpi=300, bbox_inches="tight")
+    print(f"Saved plot: {save_path}")
+
 
 def analyze_data(dataset_root, target_size):
     sets = os.listdir(dataset_root)
@@ -138,6 +172,7 @@ def analyze_data(dataset_root, target_size):
 
             plt.suptitle(f"Sample images - {st}")
             plt.tight_layout()
+            save_current_plot(f"sample_images_{sanitize_filename(st)}.png")
             plt.show()
 
 
@@ -410,7 +445,7 @@ def train_cnn_model(architecture_name, learning_rate, dropout_rate, dense_units,
         image_size,
         batch_size,
         shuffle=False,
-        repeat=False
+        repeat=True
     )
 
     test_dataset = create_tensorflow_dataset(
@@ -448,6 +483,7 @@ def train_cnn_model(architecture_name, learning_rate, dropout_rate, dense_units,
 
     val_loss, val_mae = model.evaluate(
         val_dataset,
+        steps=val_steps,
         verbose=0
     )
 
@@ -484,7 +520,7 @@ def evaluate_model_original_scale(model, dataframe, image_size, batch_size, targ
     return mse_original, mae_original, rmse_original, y_true, y_pred
 
 
-def plot_training(history, title_prefix=""):
+def plot_training(history, title_prefix="", save_name=None):
     plt.figure(figsize=(12, 6))
 
     plt.subplot(1, 2, 1)
@@ -504,10 +540,14 @@ def plot_training(history, title_prefix=""):
     plt.legend()
 
     plt.tight_layout()
+
+    if save_name is not None:
+        save_current_plot(save_name)
+
     plt.show()
 
 
-def plot_predictions_scatter(y_true, y_pred, title):
+def plot_predictions_scatter(y_true, y_pred, title, save_name=None):
     plt.figure(figsize=(6, 6))
     plt.scatter(y_true, y_pred, alpha=0.5)
     plt.xlabel("True Irradiance")
@@ -519,10 +559,14 @@ def plot_predictions_scatter(y_true, y_pred, title):
     plt.plot([min_val, max_val], [min_val, max_val], linestyle="--")
 
     plt.tight_layout()
+
+    if save_name is not None:
+        save_current_plot(save_name)
+
     plt.show()
 
 
-def plot_metric_vs_image_size(results_df, metric_name, title):
+def plot_metric_vs_image_size(results_df, metric_name, title, save_name=None):
     plt.figure(figsize=(10, 6))
 
     architectures = sorted(results_df["architecture"].unique())
@@ -541,10 +585,14 @@ def plot_metric_vs_image_size(results_df, metric_name, title):
     plt.title(title)
     plt.legend()
     plt.tight_layout()
+
+    if save_name is not None:
+        save_current_plot(save_name)
+
     plt.show()
 
 
-def plot_training_time_vs_image_size(results_df, title):
+def plot_training_time_vs_image_size(results_df, title, save_name=None):
     plt.figure(figsize=(10, 6))
 
     architectures = results_df["architecture"].unique()
@@ -567,7 +615,138 @@ def plot_training_time_vs_image_size(results_df, title):
 
     plt.legend()
     plt.tight_layout()
+
+    if save_name is not None:
+        save_current_plot(save_name)
+
     plt.show()
+
+
+
+def create_best_results_by_architecture_and_size(results_df):
+    """
+    For each CNN architecture and each image size, select the best hyperparameter
+    configuration according to the lowest validation MAE in the original scale.
+
+    This table removes duplicate points caused by the hyperparameter grid search.
+    The resulting rows represent the best achieved error for every tested input size.
+    """
+    best_indices = results_df.groupby(["architecture", "image_height", "image_width"], as_index=False)["val_mae_original"].idxmin()["val_mae_original"]
+
+    best_by_size = results_df.loc[best_indices].copy()
+    best_by_size = best_by_size.sort_values(by=["architecture", "image_height"]).reset_index(drop=True)
+
+    return best_by_size
+
+
+def create_final_best_image_size_summary(best_by_size_df):
+    """
+    For each architecture, select the image size with the lowest validation MAE.
+    This is the final summary answering which image size is best for each CNN.
+    """
+    best_indices = best_by_size_df.groupby(
+        "architecture",
+        as_index=False
+    )["val_mae_original"].idxmin()["val_mae_original"]
+
+    final_summary = best_by_size_df.loc[best_indices].copy()
+    final_summary = final_summary.sort_values(
+        by="val_mae_original",
+        ascending=True
+    ).reset_index(drop=True)
+
+    return final_summary
+
+
+def drop_non_printable_columns(dataframe):
+    columns_to_drop = []
+
+    for column in ["model", "history", "test_y_true", "test_y_pred"]:
+        if column in dataframe.columns:
+            columns_to_drop.append(column)
+
+    return dataframe.drop(columns=columns_to_drop)
+
+
+def plot_best_metric_vs_image_size(best_by_size_df, metric_name, title, ylabel, save_name=None):
+    """
+    Plot only the best result for every image size and architecture.
+    This avoids plotting all hyperparameter combinations at the same image size.
+    """
+    plt.figure(figsize=(10, 6))
+
+    architectures = sorted(best_by_size_df["architecture"].unique())
+
+    for architecture_name in architectures:
+        architecture_data = best_by_size_df[best_by_size_df["architecture"] == architecture_name]
+        architecture_data = architecture_data.sort_values("image_height")
+
+        x_values = architecture_data["image_height"]
+        y_values = architecture_data[metric_name]
+
+        plt.plot(x_values, y_values, marker="o", label=architecture_name)
+
+    plt.xlabel("Image size")
+    plt.ylabel(ylabel)
+    plt.title(title)
+    plt.legend()
+    plt.tight_layout()
+
+    if save_name is not None:
+        save_current_plot(save_name)
+
+    plt.show()
+
+
+def plot_best_training_time_vs_image_size(best_by_size_df, title, save_name=None):
+    """
+    Plot training time of the best hyperparameter configuration for every image
+    size and architecture.
+    """
+    plt.figure(figsize=(10, 6))
+
+    architectures = sorted(best_by_size_df["architecture"].unique())
+
+    for architecture_name in architectures:
+        architecture_data = best_by_size_df[best_by_size_df["architecture"] == architecture_name]
+        architecture_data = architecture_data.sort_values("image_height")
+
+        x_values = architecture_data["image_height"]
+        y_values = architecture_data["training_time_seconds"]
+
+        plt.plot(x_values, y_values, marker="o", label=architecture_name)
+
+    plt.xlabel("Image size")
+    plt.ylabel("Training time (seconds)")
+    plt.title(title)
+    plt.legend()
+    plt.tight_layout()
+
+    if save_name is not None:
+        save_current_plot(save_name)
+
+    plt.show()
+
+
+def print_final_best_image_size_summary(final_summary_df):
+    print_separator()
+    print("FINAL SUMMARY - BEST IMAGE SIZE FOR EACH CNN ARCHITECTURE")
+    print_separator()
+
+    for _, row in final_summary_df.iterrows():
+        print(f"Architecture:      {row['architecture']}")
+        print(f"Best image size:   {row['image_size_label']}")
+        print(f"Validation MAE:    {row['val_mae_original']:.4f}")
+        print(f"Validation RMSE:   {row['val_rmse_original']:.4f}")
+        print(f"Test MAE:          {row['test_mae_original']:.4f}")
+        print(f"Test RMSE:         {row['test_rmse_original']:.4f}")
+        print(f"Learning rate:     {row['learning_rate']}")
+        print(f"Dropout rate:      {row['dropout_rate']}")
+        print(f"Dense units:       {row['dense_units']}")
+        print(f"Batch size:        {row['batch_size']}")
+        print(f"Epochs trained:    {row['epochs_trained']}")
+        print(f"Training time (s): {row['training_time_seconds']:.2f}")
+        print_separator("-")
 
 
 #
@@ -603,20 +782,36 @@ for images, targets in sample_dataset.take(1):
 
 # EXPERIMENT SETTINGS
 architectures_list = ["small", "medium", "large"]
-image_sizes_list = [(64, 64), (96, 96), (128, 128), (160, 160), (224, 224)]
-learning_rates_list = [0.001, 0.0005]
-dropout_rates_list = [0.2, 0.3]
-dense_units_list = [64, 128]
-batch_sizes_list = [16, 32]
 
-all_experiments = list(product(
-    architectures_list,
-    image_sizes_list,
-    learning_rates_list,
-    dropout_rates_list,
-    dense_units_list,
-    batch_sizes_list
-))
+image_sizes_list = [
+    (64, 64),
+    (96, 96),
+    (128, 128),
+    (160, 160),
+    (224, 224)
+]
+
+learning_rates_list = [0.001]
+dropout_rates_list = [0.2, 0.3]
+dense_units_list = [48, 64]
+batch_sizes_list = [32]
+
+all_experiments = []
+
+for input_architecture in architectures_list:
+    for input_image_size in image_sizes_list:
+        for input_learning_rate in learning_rates_list:
+            for input_dropout_rate in dropout_rates_list:
+                for input_dense_units in dense_units_list:
+                    for input_batch_size in batch_sizes_list:
+                        all_experiments.append((
+                            input_architecture,
+                            input_image_size,
+                            input_learning_rate,
+                            input_dropout_rate,
+                            input_dense_units,
+                            input_batch_size
+                        ))
 
 print_separator()
 print(f"Total number of experiments: {len(all_experiments)}")
@@ -793,8 +988,64 @@ print(f"Saved best model summary: {best_model_summary_path}")
 #
 # P L O T S
 #
-plot_training(best_history, title_prefix=f"{best_architecture} ")
-plot_predictions_scatter(best_test_y_true, best_test_y_pred, "Best Model - Test Predictions vs True Irradiance")
-plot_metric_vs_image_size(results_printable, "val_mae_original", "Validation MAE vs Image Size")
-plot_metric_vs_image_size(results_printable, "val_rmse_original", "Validation RMSE vs Image Size")
-plot_training_time_vs_image_size(results_printable, "Training Time vs Image Size")
+# Aggregate results so that every architecture and every image size has only one
+# point: the best hyperparameter configuration according to validation MAE.
+best_by_size_dataframe = create_best_results_by_architecture_and_size(results_dataframe)
+best_by_size_printable = drop_non_printable_columns(best_by_size_dataframe)
+
+best_by_size_save_path = os.path.join(TABLES_DIR, "best_results_by_architecture_and_image_size.csv")
+best_by_size_printable.to_csv(best_by_size_save_path, index=False)
+
+print_separator()
+print("BEST RESULT FOR EACH ARCHITECTURE AND IMAGE SIZE")
+print_separator()
+print(best_by_size_printable)
+print(f"\nSaved best-by-size table: {best_by_size_save_path}")
+
+# Final answer for the assignment: for every CNN architecture, find the image size
+# that achieved the lowest validation error.
+final_best_image_size_summary = create_final_best_image_size_summary(best_by_size_dataframe)
+final_best_image_size_summary_printable = drop_non_printable_columns(final_best_image_size_summary)
+
+final_summary_save_path = os.path.join(TABLES_DIR, "final_best_image_size_summary.csv")
+final_best_image_size_summary_printable.to_csv(final_summary_save_path, index=False)
+
+print_final_best_image_size_summary(final_best_image_size_summary)
+print(f"Saved final best image size summary: {final_summary_save_path}")
+
+plot_training(best_history, title_prefix=f"{best_architecture} ", save_name="best_model_training_history.png")
+plot_predictions_scatter(best_test_y_true, best_test_y_pred, "Best Model - Test Predictions vs True Irradiance", save_name="best_model_test_predictions_scatter.png")
+
+# Assignment-oriented plots: these show the best achieved error for each image size,
+# not all hyperparameter combinations.
+plot_best_metric_vs_image_size(
+    best_by_size_printable,
+    "val_mae_original",
+    "Best Validation MAE vs Image Size",
+    "Validation MAE",
+    save_name="best_validation_mae_vs_image_size.png"
+)
+
+plot_best_metric_vs_image_size(
+    best_by_size_printable,
+    "val_rmse_original",
+    "Best Validation RMSE vs Image Size",
+    "Validation RMSE",
+    save_name="best_validation_rmse_vs_image_size.png"
+)
+
+plot_best_metric_vs_image_size(
+    best_by_size_printable,
+    "test_mae_original",
+    "Test MAE of Best Validation Models vs Image Size",
+    "Test MAE",
+    save_name="test_mae_of_best_validation_models_vs_image_size.png"
+)
+
+plot_best_training_time_vs_image_size(
+    best_by_size_printable,
+    "Training Time of Best Models vs Image Size",
+    save_name="training_time_of_best_models_vs_image_size.png"
+)
+
+print(f"Saved plots directory: {PLOTS_DIR}")

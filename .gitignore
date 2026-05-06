@@ -1,4 +1,4 @@
-dataset/val/images
-dataset/train/images
-dataset/test/images
+dataset/val/images/*
+dataset/train/images/*
+dataset/test/images/*
 outputs
