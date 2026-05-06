@@ -784,7 +784,6 @@ for images, targets in sample_dataset.take(1):
 architectures_list = ["medium"] # small, large
 
 image_sizes_list = [
-    (64, 64),
     (96, 96),
     (128, 128),
     (160, 160),
