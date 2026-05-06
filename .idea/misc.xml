@@ -4,5 +4,5 @@
     <option name="sdkName" value="Python 3.14" />
   </component>
   <component name="KubernetesApiProvider"><![CDATA[{}]]></component>
-  <component name="ProjectRootManager" version="2" project-jdk-name="Python 3.13.7 WSL (Ubuntu): (/home/lukaspatrnciak/.virtualenvs/tensorflow/bin/python)" project-jdk-type="Python SDK" />
+  <component name="ProjectRootManager" version="2" project-jdk-name="Python 3.12" project-jdk-type="Python SDK" />
 </project>

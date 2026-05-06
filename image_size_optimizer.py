@@ -781,7 +781,7 @@ for images, targets in sample_dataset.take(1):
     print("Targets dtype:", targets.dtype)
 
 # EXPERIMENT SETTINGS
-architectures_list = ["small", "medium", "large"]
+architectures_list = ["medium"] # small, large
 
 image_sizes_list = [
     (64, 64),
