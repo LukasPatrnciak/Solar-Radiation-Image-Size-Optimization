@@ -306,10 +306,11 @@ def create_tensorflow_dataset(dataframe, image_size, batch_size, shuffle=True, r
     if shuffle:
         dataset = dataset.shuffle(buffer_size=256, seed=RAND_ST)
 
+    dataset = dataset.batch(batch_size)
+
     if repeat:
         dataset = dataset.repeat()
 
-    dataset = dataset.batch(batch_size)
     dataset = dataset.prefetch(tf.data.AUTOTUNE)
 
     return dataset
@@ -811,15 +812,15 @@ for images, targets in sample_dataset.take(1):
 architectures_list = ["medium"] # small, large
 
 image_sizes_list = [
-    (96, 96),
+    (64,64),
     (128, 128),
-    (160, 160),
-    (224, 224)
+    (224, 224),
+    (299, 299)
 ]
 
 learning_rates_list = [0.001]
 dropout_rates_list = [0.2, 0.3]
-dense_units_list = [48, 64]
+dense_units_list = [32, 64]
 batch_sizes_list = [32]
 
 all_experiments = []
