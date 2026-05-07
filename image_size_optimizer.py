@@ -785,10 +785,10 @@ for images, targets in sample_dataset.take(1):
 architectures_list = ["medium"] # small, large
 
 image_sizes_list = [
-    (96, 96),
+    (64,64),
     (128, 128),
-    (160, 160),
-    (224, 224)
+    (224, 224),
+    (299, 299)
 ]
 
 learning_rates_list = [0.001]
