@@ -28,6 +28,7 @@ from tensorflow.keras.preprocessing.image import load_img, img_to_array
 from tensorflow.keras import mixed_precision # For GPU
 
 
+
 #
 # I N I T I A L I Z A T I O N
 #
@@ -65,6 +66,7 @@ print("Num GPUs Available:", len(gpus))
 print("GPUs Available:", gpus)
 print(f"Compute dtype: {policy.compute_dtype}")
 print(f"Variable dtype: {policy.variable_dtype}")
+
 
 
 
