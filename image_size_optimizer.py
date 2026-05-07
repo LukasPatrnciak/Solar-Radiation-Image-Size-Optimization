@@ -793,7 +793,7 @@ image_sizes_list = [
 
 learning_rates_list = [0.001]
 dropout_rates_list = [0.2, 0.3]
-dense_units_list = [48, 64]
+dense_units_list = [32, 64]
 batch_sizes_list = [32]
 
 all_experiments = []
