@@ -7,6 +7,7 @@
 
 
 
+
 #
 # L I B R A R I E S
 #
@@ -23,9 +24,10 @@ from keras import Input
 from tensorflow.keras import layers, models
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
-from tensorflow.keras.preprocessing.image import load_img, img_to_array
+from tensorflow.keras.preprocessing.image import load_img
 
 from tensorflow.keras import mixed_precision # For GPU
+
 
 
 
@@ -57,6 +59,7 @@ if gpus:
 
 policy = mixed_precision.Policy('mixed_float16')
 mixed_precision.set_global_policy(policy)
+tf.config.optimizer.set_jit(True)
 
 print(f"Intra-op parallelism threads: {tf.config.threading.get_intra_op_parallelism_threads()}")
 print(f"Inter-op parallelism threads: {tf.config.threading.get_inter_op_parallelism_threads()}")
@@ -79,6 +82,8 @@ np.random.seed(RAND_ST)
 tf.random.set_seed(RAND_ST)
 
 
+
+
 #
 # G L O B A L  S E T T I N G S
 #
@@ -89,7 +94,7 @@ IMAGE_COLUMN = "PictureName"
 TARGET_COLUMN = "Irradiance"
 
 NUM_SAMPLES = 5
-MAX_EPOCHS = 30
+MAX_EPOCHS = 50
 
 OUTPUT_DIR = "outputs"
 MODELS_DIR = os.path.join(OUTPUT_DIR, "models")
@@ -100,6 +105,8 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(MODELS_DIR, exist_ok=True)
 os.makedirs(TABLES_DIR, exist_ok=True)
 os.makedirs(PLOTS_DIR, exist_ok=True)
+
+
 
 
 #
@@ -121,14 +128,48 @@ def sanitize_filename(text):
 
     for character in text:
         if character in allowed_characters:
-            sanitized += character
+
+            sanitized = sanitized + character
         else:
-            sanitized += "_"
+            sanitized = sanitized +  "_"
 
     while "__" in sanitized:
         sanitized = sanitized.replace("__", "_")
 
     return sanitized.strip("_")
+
+
+def check_image_formats(dataset_root):
+    print_separator()
+    print("CHECKING IMAGE FORMATS")
+    print_separator()
+
+    valid_extensions = {".png"}
+    invalid_files = []
+
+    for split_name in ["train", "val", "test"]:
+        images_path = os.path.join(dataset_root, split_name, "images")
+
+        if not os.path.exists(images_path):
+            continue
+
+        for file_name in os.listdir(images_path):
+            extension = os.path.splitext(file_name)[1].lower()
+
+            if extension not in valid_extensions:
+                invalid_files.append(
+                    os.path.join(split_name, "images", file_name)
+                )
+
+    if len(invalid_files) == 0:
+        print("OK: All images are PNG.")
+    else:
+        print("WARNING: Non-PNG images found:")
+
+        for file_path in invalid_files:
+            print(file_path)
+
+        raise ValueError("Dataset contains non-PNG images.")
 
 
 def save_current_plot(file_name):
@@ -274,39 +315,38 @@ def denormalize_targets(values, target_mean, target_std):
     return values * target_std + target_mean
 
 
-def load_and_preprocess_image(image_path, target_size):
-    img = load_img(image_path, target_size=target_size)
-    img = img_to_array(img)
-    img = img / 255.0
 
-    return img
-
-
-def create_tensorflow_dataset(dataframe, image_size, batch_size, shuffle=True, repeat=False):
-    image_paths = dataframe["image_path"].values
+def create_tensorflow_dataset(dataframe, image_size, batch_size, shuffle=True, repeat=False, cache=False):
+    image_paths = dataframe["image_path"].values.astype(str)
     target_values = dataframe[TARGET_COLUMN].values.astype(np.float32)
 
-    def generator():
-        for i in range(len(image_paths)):
-            path = image_paths[i]
-            target = target_values[i]
-            image = load_and_preprocess_image(path, image_size)
+    dataset = tf.data.Dataset.from_tensor_slices((image_paths, target_values))
 
-            yield image, target
+    def load_and_preprocess_tf(image_path, target):
+        image = tf.io.read_file(image_path)
+        image = tf.io.decode_png(image, channels=3)
 
-    height = image_size[0]
-    width = image_size[1]
-    channels = 3
 
-    image_shape = (height, width, channels)
+        image.set_shape([None, None, 3])
+        image = tf.image.resize(image, image_size)
+        image = tf.cast(image, tf.float32) / 255.0
 
-    image_spec = tf.TensorSpec(shape=image_shape, dtype=tf.float32)
-    target_spec = tf.TensorSpec(shape=(), dtype=tf.float32)
+        return image, target
 
-    dataset = tf.data.Dataset.from_generator(generator, output_signature=(image_spec, target_spec))
+    dataset = dataset.map(
+        load_and_preprocess_tf,
+        num_parallel_calls=tf.data.AUTOTUNE
+    )
+
+    if cache:
+        dataset = dataset.cache()
 
     if shuffle:
-        dataset = dataset.shuffle(buffer_size=256, seed=RAND_ST)
+        dataset = dataset.shuffle(
+            buffer_size=min(len(dataframe), 1000),
+            seed=RAND_ST,
+            reshuffle_each_iteration=True
+        )
 
     dataset = dataset.batch(batch_size)
 
@@ -333,7 +373,7 @@ def create_small_cnn(learning_rate, dropout_rate, dense_units, input_shape):
         layers.GlobalAveragePooling2D(),
         layers.Dense(dense_units, activation="relu"),
         layers.Dropout(dropout_rate),
-        layers.Dense(1)
+        layers.Dense(1, dtype="float32") # float32 pre optimalizaciu GPU
     ])
 
     model.compile(optimizer=Adam(learning_rate=learning_rate), loss="mse", metrics=["mae"])
@@ -362,7 +402,7 @@ def create_medium_cnn(learning_rate, dropout_rate, dense_units, input_shape):
         layers.GlobalAveragePooling2D(),
         layers.Dense(dense_units, activation="relu"),
         layers.Dropout(dropout_rate),
-        layers.Dense(1)
+        layers.Dense(1, dtype="float32")
     ])
 
     model.compile(optimizer=Adam(learning_rate=learning_rate), loss="mse", metrics=["mae"])
@@ -398,7 +438,7 @@ def create_large_cnn(learning_rate, dropout_rate, dense_units, input_shape):
         layers.GlobalAveragePooling2D(),
         layers.Dense(dense_units, activation="relu"),
         layers.Dropout(dropout_rate),
-        layers.Dense(1)
+        layers.Dense(1, dtype="float32")
     ])
 
     model.compile(optimizer=Adam(learning_rate=learning_rate), loss="mse", metrics=["mae"])
@@ -467,7 +507,8 @@ def train_cnn_model(architecture_name, learning_rate, dropout_rate, dense_units,
         image_size,
         batch_size,
         shuffle=True,
-        repeat=True
+        repeat=True,
+        cache=True
     )
 
     val_dataset = create_tensorflow_dataset(
@@ -475,7 +516,8 @@ def train_cnn_model(architecture_name, learning_rate, dropout_rate, dense_units,
         image_size,
         batch_size,
         shuffle=False,
-        repeat=True
+        repeat=False,
+        cache=True
     )
 
     test_dataset = create_tensorflow_dataset(
@@ -487,7 +529,6 @@ def train_cnn_model(architecture_name, learning_rate, dropout_rate, dense_units,
     )
 
     train_steps = math.ceil(len(train_df) / batch_size)
-    val_steps = math.ceil(len(val_df) / batch_size)
 
     start_time = time.time()
 
@@ -496,7 +537,6 @@ def train_cnn_model(architecture_name, learning_rate, dropout_rate, dense_units,
         validation_data=val_dataset,
         epochs=epochs,
         steps_per_epoch=train_steps,
-        validation_steps=val_steps,
         callbacks=[early_stopping, reduce_lr, checkpoint],
         verbose=1
     )
@@ -513,7 +553,6 @@ def train_cnn_model(architecture_name, learning_rate, dropout_rate, dense_units,
 
     val_loss, val_mae = model.evaluate(
         val_dataset,
-        steps=val_steps,
         verbose=0
     )
 
@@ -782,6 +821,7 @@ def print_final_best_image_size_summary(final_summary_df):
 #
 # R U N
 #
+check_image_formats(DATASET_NAME)
 analyze_data(DATASET_NAME, (128, 128))
 
 train_df = load_split_dataframe(DATASET_NAME, "train")
@@ -814,10 +854,11 @@ for images, targets in sample_dataset.take(1):
 architectures_list = ["medium"] # small, large
 
 image_sizes_list = [
-    (64,64),
+    (64, 64),
+    (96, 96),
     (128, 128),
-    (224, 224),
-    (299, 299)
+    (160, 160),
+    (224, 224)
 ]
 
 learning_rates_list = [0.001]
