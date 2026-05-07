@@ -25,25 +25,52 @@ from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
 from tensorflow.keras.preprocessing.image import load_img, img_to_array
 
+from tensorflow.keras import mixed_precision # For GPU
+
 
 #
 # I N I T I A L I Z A T I O N
 #
+# 1. Počet vlákien pre matematické knižnice (CPU)
+# Ak má tvoj procesor napr. 6 jadier / 12 vlákien, "12" je v poriadku.
 os.environ["OMP_NUM_THREADS"] = "12"
 os.environ["MKL_NUM_THREADS"] = "12"
 os.environ["OPENBLAS_NUM_THREADS"] = "12"
 
-# For GPU training has to be set '0'
+# 2. Nastavenie paralelizmu v TensorFlow
+# Nastavenie na '0' znamená, že si TF vyberie počet vlákien automaticky (podľa CPU).
+# To je pre GPU tréning ideálne, lebo TF nebude CPU zbytočne brzdiť.
 tf.config.threading.set_intra_op_parallelism_threads(0)
 tf.config.threading.set_inter_op_parallelism_threads(0)
+
+# 3. KĽÚČOVÉ PRE GPU (Memory Growth):
+gpus = tf.config.list_physical_devices('GPU')
+
+if gpus:
+    try:
+        for gpu in gpus:
+            tf.config.experimental.set_memory_growth(gpu, True)
+        print(f"GPU je pripravené: {gpus}")
+    except RuntimeError as e:
+        print(f"Chyba pri inicializácii GPU: {e}")
+
+policy = mixed_precision.Policy('mixed_float16')
+mixed_precision.set_global_policy(policy)
 
 print(f"Intra-op parallelism threads: {tf.config.threading.get_intra_op_parallelism_threads()}")
 print(f"Inter-op parallelism threads: {tf.config.threading.get_inter_op_parallelism_threads()}")
 print("TensorFlow version:", tf.__version__)
 print("Built with CUDA:", tf.test.is_built_with_cuda())
-print("Num GPUs Available:", len(tf.config.list_physical_devices('GPU')))
-print(tf.config.list_physical_devices('GPU'))
+print("Num GPUs Available:", len(gpus))
+print("GPUs Available:", gpus)
+print(f"Compute dtype: {policy.compute_dtype}")
+print(f"Variable dtype: {policy.variable_dtype}")
 
+
+
+#
+# VARIABLES
+#
 RAND_ST = 42
 random.seed(RAND_ST)
 np.random.seed(RAND_ST)
