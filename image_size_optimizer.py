@@ -29,12 +29,11 @@ import numpy as np
 import tensorflow as tf
 import matplotlib.pyplot as plt
 
-from keras import Input
+from tensorflow.keras import Input
 from tensorflow.keras import layers, models
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
 from tensorflow.keras.preprocessing.image import load_img
-
 from tensorflow.keras import mixed_precision # For GPU
 
 
@@ -319,7 +318,7 @@ def denormalize_targets(values, target_mean, target_std):
     return values * target_std + target_mean
 
 
-def create_tensorflow_dataset(dataframe, image_size, batch_size, shuffle=True, repeat=False, cache=False):
+def create_tensorflow_dataset(dataframe, image_size, batch_size, shuffle=True, repeat=False, cache=False, cache_name="dataset"):
     image_paths = dataframe["image_path"].values.astype(str)
     target_values = dataframe[TARGET_COLUMN].values.astype(np.float32)
 
@@ -340,20 +339,18 @@ def create_tensorflow_dataset(dataframe, image_size, batch_size, shuffle=True, r
         num_parallel_calls=tf.data.AUTOTUNE
     )
 
+    if cache:
+        os.makedirs("cache", exist_ok=True)
+        cache_path = os.path.join("cache", f"{cache_name}_{image_size[0]}x{image_size[1]}_{len(dataframe)}")
+        dataset = dataset.cache(cache_path)
+
+
     if shuffle:
         dataset = dataset.shuffle(
             buffer_size=min(len(dataframe), 1000),
             seed=RAND_ST,
             reshuffle_each_iteration=True
         )
-
-    if cache:
-        os.makedirs("cache", exist_ok=True)
-        cache_path = os.path.join(
-            "cache",
-            f"cache_{image_size[0]}x{image_size[1]}_{len(dataframe)}"
-        )
-        dataset = dataset.cache(cache_path)
 
     if repeat:
         dataset = dataset.repeat()
@@ -521,7 +518,8 @@ def train_cnn_model(architecture_name, learning_rate, dropout_rate, dense_units,
         batch_size,
         shuffle=True,
         repeat=True,
-        cache=True
+        cache=True,
+        cache_name="train"
     )
 
     val_dataset = create_tensorflow_dataset(
@@ -530,7 +528,8 @@ def train_cnn_model(architecture_name, learning_rate, dropout_rate, dense_units,
         batch_size,
         shuffle=False,
         repeat=False,
-        cache=True
+        cache=True,
+        cache_name="val"
     )
 
     test_dataset = create_tensorflow_dataset(
@@ -539,7 +538,8 @@ def train_cnn_model(architecture_name, learning_rate, dropout_rate, dense_units,
         batch_size,
         shuffle=False,
         repeat=False,
-        cache=True
+        cache=True,
+        cache_name="test"
     )
 
     train_steps = math.ceil(len(train_df) / batch_size)
@@ -578,13 +578,14 @@ def train_cnn_model(architecture_name, learning_rate, dropout_rate, dense_units,
     return model, history, checkpoint_path, train_mae, val_mae, test_mae, train_loss, val_loss, test_loss, training_time_seconds, epochs_trained, model_parameters
 
 
-def evaluate_model_original_scale(model, dataframe, image_size, batch_size, target_mean, target_std):
+def evaluate_model_original_scale(model, dataframe, image_size, batch_size, target_mean, target_std, cache_name):
     dataset = create_tensorflow_dataset(
         dataframe,
         image_size,
         batch_size,
         shuffle=False,
-        cache=True
+        cache=True,
+        cache_name=cache_name
     )
 
     """
@@ -959,11 +960,11 @@ for experiment_index, experiment in enumerate(all_experiments, start=1):
     experiment_model_parameters = trained_experiment_model[11]
 
     val_mse_original, val_mae_original, val_rmse_original, _, _ = evaluate_model_original_scale(
-        experiment_model, val_df, image_size_element, batch_size_element, fit_target_mean, fit_target_std
+        experiment_model, val_df, image_size_element, batch_size_element, fit_target_mean, fit_target_std, cache_name="eval_val"
     )
 
     test_mse_original, test_mae_original, test_rmse_original, test_y_true, test_y_pred = evaluate_model_original_scale(
-        experiment_model, test_df, image_size_element, batch_size_element, fit_target_mean, fit_target_std
+        experiment_model, test_df, image_size_element, batch_size_element, fit_target_mean, fit_target_std, cache_name="eval_test"
     )
 
     results.append({
