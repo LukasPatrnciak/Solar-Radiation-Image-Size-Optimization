@@ -509,7 +509,7 @@ def train_cnn_model(architecture_name, learning_rate, dropout_rate, dense_units,
         batch_size,
         shuffle=True,
         repeat=True,
-        cache=True
+        cache=False
     )
 
     val_dataset = create_tensorflow_dataset(
@@ -518,7 +518,7 @@ def train_cnn_model(architecture_name, learning_rate, dropout_rate, dense_units,
         batch_size,
         shuffle=False,
         repeat=False,
-        cache=True
+        cache=False
     )
 
     test_dataset = create_tensorflow_dataset(
