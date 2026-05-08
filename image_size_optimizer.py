@@ -319,7 +319,6 @@ def denormalize_targets(values, target_mean, target_std):
     return values * target_std + target_mean
 
 
-
 def create_tensorflow_dataset(dataframe, image_size, batch_size, shuffle=True, repeat=False, cache=False):
     image_paths = dataframe["image_path"].values.astype(str)
     target_values = dataframe[TARGET_COLUMN].values.astype(np.float32)
@@ -329,7 +328,6 @@ def create_tensorflow_dataset(dataframe, image_size, batch_size, shuffle=True, r
     def load_and_preprocess_tf(image_path, target):
         image = tf.io.read_file(image_path)
         image = tf.io.decode_png(image, channels=3)
-
 
         image.set_shape([None, None, 3])
         image = tf.image.resize(image, image_size)
@@ -342,17 +340,20 @@ def create_tensorflow_dataset(dataframe, image_size, batch_size, shuffle=True, r
         num_parallel_calls=tf.data.AUTOTUNE
     )
 
-    if cache:
-        os.makedirs("cache", exist_ok=True)
-        cache_path = os.path.join("cache", f"cache_{image_size[0]}x{image_size[1]}_{len(dataframe)}")
-        dataset = dataset.cache(cache_path)
-
     if shuffle:
         dataset = dataset.shuffle(
             buffer_size=min(len(dataframe), 1000),
             seed=RAND_ST,
             reshuffle_each_iteration=True
         )
+
+    if cache:
+        os.makedirs("cache", exist_ok=True)
+        cache_path = os.path.join(
+            "cache",
+            f"cache_{image_size[0]}x{image_size[1]}_{len(dataframe)}"
+        )
+        dataset = dataset.cache(cache_path)
 
     if repeat:
         dataset = dataset.repeat()
@@ -847,7 +848,6 @@ def print_final_best_image_size_summary(final_summary_df):
 #
 # R U N
 #
-os.makedirs("cache", exist_ok=True) # Create folder for cached images
 check_image_formats(DATASET_NAME)
 analyze_data(DATASET_NAME, (128, 128))
 
@@ -868,7 +868,7 @@ train_df[TARGET_COLUMN] = normalize_targets(train_df[TARGET_COLUMN].values, fit_
 val_df[TARGET_COLUMN] = normalize_targets(val_df[TARGET_COLUMN].values, fit_target_mean, fit_target_std)
 test_df[TARGET_COLUMN] = normalize_targets(test_df[TARGET_COLUMN].values, fit_target_mean, fit_target_std)
 
-sample_dataset = create_tensorflow_dataset(train_df, (128, 128), 16, shuffle=True, cache=True)
+sample_dataset = create_tensorflow_dataset(train_df, (128, 128), 16, shuffle=True)
 
 for images, targets in sample_dataset.take(1):
     print("\nDataset check:")
