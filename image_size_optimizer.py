@@ -104,6 +104,7 @@ MODELS_DIR = os.path.join(OUTPUT_DIR, "models")
 TABLES_DIR = os.path.join(OUTPUT_DIR, "tables")
 PLOTS_DIR = os.path.join(OUTPUT_DIR, "plots")
 
+shutil.rmtree("cache", ignore_errors=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(MODELS_DIR, exist_ok=True)
 os.makedirs(TABLES_DIR, exist_ok=True)
@@ -318,7 +319,7 @@ def denormalize_targets(values, target_mean, target_std):
     return values * target_std + target_mean
 
 
-def create_tensorflow_dataset(dataframe, image_size, batch_size, shuffle=True, repeat=False, cache=False, cache_name="dataset"):
+def create_tensorflow_dataset(dataframe, image_size, batch_size, shuffle=False, cache=False, cache_name="dataset"):
     image_paths = dataframe["image_path"].values.astype(str)
     target_values = dataframe[TARGET_COLUMN].values.astype(np.float32)
 
@@ -344,7 +345,6 @@ def create_tensorflow_dataset(dataframe, image_size, batch_size, shuffle=True, r
         cache_path = os.path.join("cache", f"{cache_name}_{image_size[0]}x{image_size[1]}_{len(dataframe)}")
         dataset = dataset.cache(cache_path)
 
-
     if shuffle:
         dataset = dataset.shuffle(
             buffer_size=min(len(dataframe), 1000),
@@ -352,15 +352,7 @@ def create_tensorflow_dataset(dataframe, image_size, batch_size, shuffle=True, r
             reshuffle_each_iteration=True
         )
 
-    if repeat:
-        dataset = dataset.repeat()
-
     dataset = dataset.batch(batch_size)
-
-    options = tf.data.Options()
-    options.autotune.ram_budget = 4 * 1024 * 1024 * 1024
-
-    dataset = dataset.with_options(options)
     dataset = dataset.prefetch(tf.data.AUTOTUNE)
 
     return dataset
@@ -517,7 +509,6 @@ def train_cnn_model(architecture_name, learning_rate, dropout_rate, dense_units,
         image_size,
         batch_size,
         shuffle=True,
-        repeat=True,
         cache=True,
         cache_name="train"
     )
@@ -527,7 +518,6 @@ def train_cnn_model(architecture_name, learning_rate, dropout_rate, dense_units,
         image_size,
         batch_size,
         shuffle=False,
-        repeat=False,
         cache=True,
         cache_name="val"
     )
@@ -537,12 +527,9 @@ def train_cnn_model(architecture_name, learning_rate, dropout_rate, dense_units,
         image_size,
         batch_size,
         shuffle=False,
-        repeat=False,
-        cache=True,
+        cache=False,
         cache_name="test"
     )
-
-    train_steps = math.ceil(len(train_df) / batch_size)
 
     start_time = time.time()
 
@@ -550,7 +537,6 @@ def train_cnn_model(architecture_name, learning_rate, dropout_rate, dense_units,
         train_dataset,
         validation_data=val_dataset,
         epochs=epochs,
-        steps_per_epoch=train_steps,
         callbacks=[early_stopping, reduce_lr, checkpoint],
         verbose=1
     )
@@ -561,7 +547,6 @@ def train_cnn_model(architecture_name, learning_rate, dropout_rate, dense_units,
 
     train_loss, train_mae = model.evaluate(
         train_dataset,
-        steps=train_steps,
         verbose=0
     )
 
@@ -578,13 +563,13 @@ def train_cnn_model(architecture_name, learning_rate, dropout_rate, dense_units,
     return model, history, checkpoint_path, train_mae, val_mae, test_mae, train_loss, val_loss, test_loss, training_time_seconds, epochs_trained, model_parameters
 
 
-def evaluate_model_original_scale(model, dataframe, image_size, batch_size, target_mean, target_std, cache_name):
+def evaluate_model_original_scale(model, dataframe, image_size, batch_size, target_mean, target_std, cache=False, cache_name="eval_cache"):
     dataset = create_tensorflow_dataset(
         dataframe,
         image_size,
         batch_size,
         shuffle=False,
-        cache=True,
+        cache=cache,
         cache_name=cache_name
     )
 
@@ -727,7 +712,7 @@ def create_best_results_by_architecture_and_size(results_df):
     This table removes duplicate points caused by the hyperparameter grid search.
     The resulting rows represent the best achieved error for every tested input size.
     """
-    best_indices = results_df.groupby(["architecture", "image_height", "image_width"], as_index=False)["val_mae_original"].idxmin()["val_mae_original"]
+    best_indices = results_df.groupby(["architecture", "image_height", "image_width"])["val_mae_original"].idxmin()
 
     best_by_size = results_df.loc[best_indices].copy()
     best_by_size = best_by_size.sort_values(by=["architecture", "image_height"]).reset_index(drop=True)
@@ -740,10 +725,7 @@ def create_final_best_image_size_summary(best_by_size_df):
     For each architecture, select the image size with the lowest validation MAE.
     This is the final summary answering which image size is best for each CNN.
     """
-    best_indices = best_by_size_df.groupby(
-        "architecture",
-        as_index=False
-    )["val_mae_original"].idxmin()["val_mae_original"]
+    best_indices = best_by_size_df.groupby("architecture")["val_mae_original"].idxmin()
 
     final_summary = best_by_size_df.loc[best_indices].copy()
     final_summary = final_summary.sort_values(
@@ -960,12 +942,10 @@ for experiment_index, experiment in enumerate(all_experiments, start=1):
     experiment_model_parameters = trained_experiment_model[11]
 
     val_mse_original, val_mae_original, val_rmse_original, _, _ = evaluate_model_original_scale(
-        experiment_model, val_df, image_size_element, batch_size_element, fit_target_mean, fit_target_std, cache_name="eval_val"
-    )
+        experiment_model, val_df, image_size_element, batch_size_element, fit_target_mean, fit_target_std, cache=False, cache_name="val_eval_cache")
 
     test_mse_original, test_mae_original, test_rmse_original, test_y_true, test_y_pred = evaluate_model_original_scale(
-        experiment_model, test_df, image_size_element, batch_size_element, fit_target_mean, fit_target_std, cache_name="eval_test"
-    )
+        experiment_model, test_df, image_size_element, batch_size_element, fit_target_mean, fit_target_std, cache=False, cache_name="test_eval_cache")
 
     results.append({
         "architecture": architecture_name_element,
