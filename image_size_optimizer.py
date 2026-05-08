@@ -868,7 +868,7 @@ train_df[TARGET_COLUMN] = normalize_targets(train_df[TARGET_COLUMN].values, fit_
 val_df[TARGET_COLUMN] = normalize_targets(val_df[TARGET_COLUMN].values, fit_target_mean, fit_target_std)
 test_df[TARGET_COLUMN] = normalize_targets(test_df[TARGET_COLUMN].values, fit_target_mean, fit_target_std)
 
-sample_dataset = create_tensorflow_dataset(train_df, (128, 128), 16, shuffle=True)
+sample_dataset = create_tensorflow_dataset(train_df, (128, 128), 16, shuffle=True, cache=True)
 
 for images, targets in sample_dataset.take(1):
     print("\nDataset check:")
