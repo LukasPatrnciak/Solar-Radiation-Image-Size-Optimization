@@ -862,10 +862,10 @@ image_sizes_list = [
     (224, 224)
 ]
 
-learning_rates_list = [0.001]
+learning_rates_list = [0.001, 0.0001]
 dropout_rates_list = [0.2, 0.3]
-dense_units_list = [32, 64]
-batch_sizes_list = [32]
+dense_units_list = [64, 128]
+batch_sizes_list = [64]
 
 all_experiments = []
 
