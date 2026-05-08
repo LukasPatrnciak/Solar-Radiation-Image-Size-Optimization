@@ -12,6 +12,7 @@
 # L I B R A R I E S
 #
 import os
+import shutil
 
 # 1. Počet vlákien pre matematické knižnice (CPU)
 # Ak má tvoj procesor napr. 6 jadier / 12 vlákien, "12" je v poriadku.
@@ -342,7 +343,9 @@ def create_tensorflow_dataset(dataframe, image_size, batch_size, shuffle=True, r
     )
 
     if cache:
-        dataset = dataset.cache()
+        os.makedirs("cache", exist_ok=True)
+        cache_path = os.path.join("cache", f"cache_{image_size[0]}x{image_size[1]}_{len(dataframe)}")
+        dataset = dataset.cache(cache_path)
 
     if shuffle:
         dataset = dataset.shuffle(
@@ -517,7 +520,7 @@ def train_cnn_model(architecture_name, learning_rate, dropout_rate, dense_units,
         batch_size,
         shuffle=True,
         repeat=True,
-        cache=False
+        cache=True
     )
 
     val_dataset = create_tensorflow_dataset(
@@ -526,7 +529,7 @@ def train_cnn_model(architecture_name, learning_rate, dropout_rate, dense_units,
         batch_size,
         shuffle=False,
         repeat=False,
-        cache=False
+        cache=True
     )
 
     test_dataset = create_tensorflow_dataset(
@@ -535,7 +538,7 @@ def train_cnn_model(architecture_name, learning_rate, dropout_rate, dense_units,
         batch_size,
         shuffle=False,
         repeat=False,
-        cache=False
+        cache=True
     )
 
     train_steps = math.ceil(len(train_df) / batch_size)
@@ -579,7 +582,8 @@ def evaluate_model_original_scale(model, dataframe, image_size, batch_size, targ
         dataframe,
         image_size,
         batch_size,
-        shuffle=False
+        shuffle=False,
+        cache=True
     )
 
     """
@@ -843,6 +847,7 @@ def print_final_best_image_size_summary(final_summary_df):
 #
 # R U N
 #
+os.makedirs("cache", exist_ok=True) # Create folder for cached images
 check_image_formats(DATASET_NAME)
 analyze_data(DATASET_NAME, (128, 128))
 
@@ -1013,6 +1018,7 @@ for experiment_index, experiment in enumerate(all_experiments, start=1):
     gc.collect()
 
 
+
 #
 # R E S U L T S
 #
@@ -1028,6 +1034,7 @@ results_save_path = os.path.join(TABLES_DIR, "results.csv")
 results_printable.to_csv(results_save_path, index=False)
 
 print(f"\nSaved results table: {results_save_path}")
+
 
 
 #
@@ -1149,3 +1156,6 @@ plot_best_training_time_vs_image_size(
 )
 
 print(f"Saved plots directory: {PLOTS_DIR}")
+
+shutil.rmtree("cache", ignore_errors=True)
+print("Cache was successfully deleted.")
