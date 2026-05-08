@@ -12,8 +12,16 @@
 # L I B R A R I E S
 #
 import os
+
+# 1. Počet vlákien pre matematické knižnice (CPU)
+# Ak má tvoj procesor napr. 6 jadier / 12 vlákien, "12" je v poriadku.
+os.environ["OMP_NUM_THREADS"] = "12"
+os.environ["MKL_NUM_THREADS"] = "12"
+os.environ["OPENBLAS_NUM_THREADS"] = "12"
+
 import math
 import time
+import gc
 import random
 import pandas as pd
 import numpy as np
@@ -34,12 +42,6 @@ from tensorflow.keras import mixed_precision # For GPU
 #
 # I N I T I A L I Z A T I O N
 #
-# 1. Počet vlákien pre matematické knižnice (CPU)
-# Ak má tvoj procesor napr. 6 jadier / 12 vlákien, "12" je v poriadku.
-os.environ["OMP_NUM_THREADS"] = "12"
-os.environ["MKL_NUM_THREADS"] = "12"
-os.environ["OPENBLAS_NUM_THREADS"] = "12"
-
 # 2. Nastavenie paralelizmu v TensorFlow
 # Nastavenie na '0' znamená, že si TF vyberie počet vlákien automaticky (podľa CPU).
 # To je pre GPU tréning ideálne, lebo TF nebude CPU zbytočne brzdiť.
@@ -60,7 +62,7 @@ if gpus:
 
 policy = mixed_precision.Policy('mixed_float16')
 mixed_precision.set_global_policy(policy)
-tf.config.optimizer.set_jit(True)
+tf.config.optimizer.set_jit(False)
 
 print(f"Intra-op parallelism threads: {tf.config.threading.get_intra_op_parallelism_threads()}")
 print(f"Inter-op parallelism threads: {tf.config.threading.get_inter_op_parallelism_threads()}")
@@ -349,11 +351,15 @@ def create_tensorflow_dataset(dataframe, image_size, batch_size, shuffle=True, r
             reshuffle_each_iteration=True
         )
 
-    dataset = dataset.batch(batch_size)
-
     if repeat:
         dataset = dataset.repeat()
 
+    dataset = dataset.batch(batch_size)
+
+    options = tf.data.Options()
+    options.autotune.ram_budget = 4 * 1024 * 1024 * 1024
+
+    dataset = dataset.with_options(options)
     dataset = dataset.prefetch(tf.data.AUTOTUNE)
 
     return dataset
@@ -526,7 +532,8 @@ def train_cnn_model(architecture_name, learning_rate, dropout_rate, dense_units,
         image_size,
         batch_size,
         shuffle=False,
-        repeat=False
+        repeat=False,
+        cache=False
     )
 
     train_steps = math.ceil(len(train_df) / batch_size)
@@ -562,23 +569,34 @@ def train_cnn_model(architecture_name, learning_rate, dropout_rate, dense_units,
         verbose=0
     )
 
-    return model, history, train_mae, val_mae, test_mae, train_loss, val_loss, test_loss, training_time_seconds, epochs_trained
+    return model, history, checkpoint_path, train_mae, val_mae, test_mae, train_loss, val_loss, test_loss, training_time_seconds, epochs_trained
 
 
 def evaluate_model_original_scale(model, dataframe, image_size, batch_size, target_mean, target_std):
-    dataset = create_tensorflow_dataset(dataframe, image_size, batch_size, shuffle=False)
+    dataset = create_tensorflow_dataset(
+        dataframe,
+        image_size,
+        batch_size,
+        shuffle=False
+    )
 
-    y_true_norm = []
-    y_pred_norm = []
-
+    """
+    Aby sa neprechadzal cely dataset po batchoch
     for image_batch, target_batch in dataset:
         predictions = model.predict(image_batch, verbose=0).reshape(-1)
 
-        y_true_norm.extend(target_batch.numpy().reshape(-1))
-        y_pred_norm.extend(predictions)
+    y_true_norm.extend(target_batch.numpy().reshape(-1))
+    y_pred_norm.extend(predictions)
 
     y_true_norm = np.array(y_true_norm, dtype=np.float32)
     y_pred_norm = np.array(y_pred_norm, dtype=np.float32)
+    """
+
+    predictions = model.predict(dataset, verbose=0)
+    y_pred_norm = predictions.reshape(-1)
+
+    y_true_norm = dataframe[TARGET_COLUMN].values.astype(np.float32)
+    y_pred_norm = y_pred_norm.astype(np.float32)
 
     y_true = denormalize_targets(y_true_norm, target_mean, target_std)
     y_pred = denormalize_targets(y_pred_norm, target_mean, target_std)
@@ -731,7 +749,7 @@ def create_final_best_image_size_summary(best_by_size_df):
 def drop_non_printable_columns(dataframe):
     columns_to_drop = []
 
-    for column in ["model", "history", "test_y_true", "test_y_pred"]:
+    for column in ["history", "test_y_true", "test_y_pred"]:
         if column in dataframe.columns:
             columns_to_drop.append(column)
 
@@ -921,14 +939,15 @@ for experiment_index, experiment in enumerate(all_experiments, start=1):
 
     experiment_model = trained_experiment_model[0]
     experiment_history = trained_experiment_model[1]
-    experiment_train_mae = trained_experiment_model[2]
-    experiment_val_mae = trained_experiment_model[3]
-    experiment_test_mae = trained_experiment_model[4]
-    experiment_train_loss = trained_experiment_model[5]
-    experiment_val_loss = trained_experiment_model[6]
-    experiment_test_loss = trained_experiment_model[7]
-    experiment_training_time = trained_experiment_model[8]
-    experiment_epochs_trained = trained_experiment_model[9]
+    experiment_model_path = trained_experiment_model[2]
+    experiment_train_mae = trained_experiment_model[3]
+    experiment_val_mae = trained_experiment_model[4]
+    experiment_test_mae = trained_experiment_model[5]
+    experiment_train_loss = trained_experiment_model[6]
+    experiment_val_loss = trained_experiment_model[7]
+    experiment_test_loss = trained_experiment_model[8]
+    experiment_training_time = trained_experiment_model[9]
+    experiment_epochs_trained = trained_experiment_model[10]
 
     val_mse_original, val_mae_original, val_rmse_original, _, _ = evaluate_model_original_scale(
         experiment_model, val_df, image_size_element, batch_size_element, fit_target_mean, fit_target_std
@@ -940,7 +959,7 @@ for experiment_index, experiment in enumerate(all_experiments, start=1):
 
     results.append({
         "architecture": architecture_name_element,
-        "model": experiment_model,
+        "model_path": experiment_model_path,
         "history": experiment_history,
         "image_height": image_size_element[0],
         "image_width": image_size_element[1],
@@ -983,12 +1002,16 @@ for experiment_index, experiment in enumerate(all_experiments, start=1):
     print(f"Training time (s): {experiment_training_time:.2f}")
     print(f"Epochs trained:    {experiment_epochs_trained}")
 
+    del experiment_model
+    tf.keras.backend.clear_session()
+    gc.collect()
+
 
 #
 # R E S U L T S
 #
 results_dataframe = pd.DataFrame(results)
-results_printable = results_dataframe.drop(columns=["model", "history", "test_y_true", "test_y_pred"]).sort_values(by="val_mae_original", ascending=True).reset_index(drop=True)
+results_printable = results_dataframe.drop(columns=["history", "test_y_true", "test_y_pred"]).sort_values(by="val_mae_original", ascending=True).reset_index(drop=True)
 
 print_separator()
 print("RESULTS TABLE")
@@ -1007,7 +1030,7 @@ print(f"\nSaved results table: {results_save_path}")
 best_index = results_dataframe["val_mae_original"].idxmin()
 best_model_row = results_dataframe.loc[best_index]
 
-best_model = best_model_row["model"]
+best_model = tf.keras.models.load_model(best_model_row["model_path"])
 best_history = best_model_row["history"]
 
 best_architecture = best_model_row["architecture"]
@@ -1047,7 +1070,7 @@ print_separator()
 best_model_path = os.path.join(MODELS_DIR, "best_model.keras")
 best_model.save(best_model_path)
 
-best_model_summary = best_model_row.drop(labels=["model", "history", "test_y_true", "test_y_pred"])
+best_model_summary = best_model_row.drop(labels=["history", "test_y_true", "test_y_pred"])
 best_model_summary = pd.DataFrame([best_model_summary])
 best_model_summary_path = os.path.join(TABLES_DIR, "best_model_summary.csv")
 best_model_summary.to_csv(best_model_summary_path, index=False)
