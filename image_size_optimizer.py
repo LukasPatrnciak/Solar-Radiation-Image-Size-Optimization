@@ -477,6 +477,8 @@ def train_cnn_model(architecture_name, learning_rate, dropout_rate, dense_units,
         input_shape=input_shape
     )
 
+    model_parameters = model.count_params()
+
     drop_str = str(dropout_rate).replace(".", "_")
     lr_str = str(learning_rate).replace(".", "_")
 
@@ -569,7 +571,7 @@ def train_cnn_model(architecture_name, learning_rate, dropout_rate, dense_units,
         verbose=0
     )
 
-    return model, history, checkpoint_path, train_mae, val_mae, test_mae, train_loss, val_loss, test_loss, training_time_seconds, epochs_trained
+    return model, history, checkpoint_path, train_mae, val_mae, test_mae, train_loss, val_loss, test_loss, training_time_seconds, epochs_trained, model_parameters
 
 
 def evaluate_model_original_scale(model, dataframe, image_size, batch_size, target_mean, target_std):
@@ -823,6 +825,7 @@ def print_final_best_image_size_summary(final_summary_df):
 
     for _, row in final_summary_df.iterrows():
         print(f"Architecture:      {row['architecture']}")
+        print(f"Model parameters:  {row['model_parameters']}")
         print(f"Best image size:   {row['image_size_label']}")
         print(f"Validation MAE:    {row['val_mae_original']:.4f}")
         print(f"Validation RMSE:   {row['val_rmse_original']:.4f}")
@@ -948,6 +951,7 @@ for experiment_index, experiment in enumerate(all_experiments, start=1):
     experiment_test_loss = trained_experiment_model[8]
     experiment_training_time = trained_experiment_model[9]
     experiment_epochs_trained = trained_experiment_model[10]
+    experiment_model_parameters = trained_experiment_model[11]
 
     val_mse_original, val_mae_original, val_rmse_original, _, _ = evaluate_model_original_scale(
         experiment_model, val_df, image_size_element, batch_size_element, fit_target_mean, fit_target_std
@@ -960,6 +964,7 @@ for experiment_index, experiment in enumerate(all_experiments, start=1):
     results.append({
         "architecture": architecture_name_element,
         "model_path": experiment_model_path,
+        "model_parameters": experiment_model_parameters,
         "history": experiment_history,
         "image_height": image_size_element[0],
         "image_width": image_size_element[1],
@@ -999,6 +1004,7 @@ for experiment_index, experiment in enumerate(all_experiments, start=1):
     print(f"Test  MAE (original): {test_mae_original:.4f}")
     print(f"Test  RMSE(original): {test_rmse_original:.4f}")
 
+    print(f"Model parameters:  {experiment_model_parameters}")
     print(f"Training time (s): {experiment_training_time:.2f}")
     print(f"Epochs trained:    {experiment_epochs_trained}")
 
