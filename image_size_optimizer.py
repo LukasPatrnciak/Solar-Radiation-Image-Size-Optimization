@@ -53,9 +53,10 @@ if gpus:
     try:
         for gpu in gpus:
             tf.config.experimental.set_memory_growth(gpu, True)
-        print(f"GPU je pripravené: {gpus}")
+        print(f"GPU is ready: {gpus}")
+
     except RuntimeError as e:
-        print(f"Chyba pri inicializácii GPU: {e}")
+        print(f"Error with GPU initialization: {e}")
 
 policy = mixed_precision.Policy('mixed_float16')
 mixed_precision.set_global_policy(policy)
@@ -851,7 +852,7 @@ for images, targets in sample_dataset.take(1):
     print("Targets dtype:", targets.dtype)
 
 # EXPERIMENT SETTINGS
-architectures_list = ["medium"] # small, large
+architectures_list = ["small", "medium", "large"]
 
 image_sizes_list = [
     (64, 64),
