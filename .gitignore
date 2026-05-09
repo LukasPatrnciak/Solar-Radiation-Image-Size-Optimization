@@ -1,6 +1,5 @@
 dataset/val/images/*
 dataset/train/images/*
 dataset/test/images/*
-outputs
 .idea/misc.xml
 .idea/SolarRadiationImageSizeOptimization.iml
