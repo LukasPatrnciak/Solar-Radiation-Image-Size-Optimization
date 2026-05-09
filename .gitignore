@@ -3,3 +3,4 @@ dataset/train/images/*
 dataset/test/images/*
 .idea/misc.xml
 .idea/SolarRadiationImageSizeOptimization.iml
+.idea/**
