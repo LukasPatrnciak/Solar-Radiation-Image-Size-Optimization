@@ -1,24 +1,24 @@
 #  S K Y  I M A G E
 #       S I Z E  O P T I M I Z A T I O N
 # -------------------------------
-# Authors: Bc. Lukas Patrnciak
-#          Bc. Andrej Tomcik
-#          Bc. Juraj Sevcik
+#      Bc. Lukas Patrnciak
+#      Bc. Andrej Tomcik
+#      Bc. Juraj Sevcik
 
 
 
 
 #
-# L I B R A R I E S
+# P O U Z I T E  K N I Z N I C E
 #
 import os
 import shutil
 
-# 1. Počet vlákien pre matematické knižnice (CPU)
-# Ak má tvoj procesor napr. 6 jadier / 12 vlákien, "12" je v poriadku.
-os.environ["OMP_NUM_THREADS"] = "12"
-os.environ["MKL_NUM_THREADS"] = "12"
-os.environ["OPENBLAS_NUM_THREADS"] = "12"
+# Pocet vlakien pre kniznice pre trenovanie na CPU (nakoniec sme trenovali na GPU, ale keby nahodou)
+# Ak ma procesor napr. 6 jadier / 12 vlakien, je to v poriadku - treba prisposobit, ide o bezpecnostne obmedzenie
+# os.environ["OMP_NUM_THREADS"] = "12"
+# os.environ["MKL_NUM_THREADS"] = "12"
+# os.environ["OPENBLAS_NUM_THREADS"] = "12"
 
 import math
 import time
@@ -40,15 +40,15 @@ from tensorflow.keras import mixed_precision # For GPU
 
 
 #
-# I N I T I A L I Z A T I O N
+# I N I C I A L I Z A C I A
 #
-# 2. Nastavenie paralelizmu v TensorFlow
-# Nastavenie na '0' znamená, že si TF vyberie počet vlákien automaticky (podľa CPU).
-# To je pre GPU tréning ideálne, lebo TF nebude CPU zbytočne brzdiť.
+# Nastavenie paralelizmu v TensorFlow
+# 0 - TF si vyberie pocet vlakien automaticky (podla CPU)
+# Kvoli treningu na GPU - CPU nebude zbytocne brzdit terning
 tf.config.threading.set_intra_op_parallelism_threads(0)
 tf.config.threading.set_inter_op_parallelism_threads(0)
 
-# 3. KĽÚČOVÉ PRE GPU (Memory Growth):
+# Klucove nastavenia pre trening na GPU
 gpus = tf.config.list_physical_devices('GPU')
 
 if gpus:
@@ -77,7 +77,7 @@ print(f"Variable dtype: {policy.variable_dtype}")
 
 
 #
-# VARIABLES
+# P R E M E N N E
 #
 RAND_ST = 42
 random.seed(RAND_ST)
@@ -88,7 +88,7 @@ tf.random.set_seed(RAND_ST)
 
 
 #
-# G L O B A L  S E T T I N G S
+# N A S T A V E N I A
 #
 DATASET_NAME = "dataset"
 CSV_FILE_NAME = "meteo_data.csv"
@@ -114,9 +114,9 @@ os.makedirs(PLOTS_DIR, exist_ok=True)
 
 
 #
-# B A S E  F U N C T I O N S
+# P O M O C N E  F U N K C I E
 #
-def print_separator(char="=", length=100):
+def print_text_separation(char="=", length=100):
     print(char * length)
 
 
@@ -132,8 +132,8 @@ def sanitize_filename(text):
 
     for character in text:
         if character in allowed_characters:
-
             sanitized = sanitized + character
+
         else:
             sanitized = sanitized +  "_"
 
@@ -144,9 +144,9 @@ def sanitize_filename(text):
 
 
 def check_image_formats(dataset_root):
-    print_separator()
+    print_text_separation()
     print("CHECKING IMAGE FORMATS")
-    print_separator()
+    print_text_separation()
 
     valid_extensions = {".png"}
     invalid_files = []
@@ -161,12 +161,11 @@ def check_image_formats(dataset_root):
             extension = os.path.splitext(file_name)[1].lower()
 
             if extension not in valid_extensions:
-                invalid_files.append(
-                    os.path.join(split_name, "images", file_name)
-                )
+                invalid_files.append(os.path.join(split_name, "images", file_name))
 
     if len(invalid_files) == 0:
         print("OK: All images are PNG.")
+
     else:
         print("WARNING: Non-PNG images found:")
 
@@ -184,6 +183,7 @@ def save_current_plot(file_name):
 
     save_path = os.path.join(PLOTS_DIR, file_name)
     plt.savefig(save_path, dpi=300, bbox_inches="tight")
+
     print(f"Saved plot: {save_path}")
 
 
@@ -335,10 +335,7 @@ def create_tensorflow_dataset(dataframe, image_size, batch_size, shuffle=False, 
 
         return image, target
 
-    dataset = dataset.map(
-        load_and_preprocess_tf,
-        num_parallel_calls=tf.data.AUTOTUNE
-    )
+    dataset = dataset.map(load_and_preprocess_tf, num_parallel_calls=tf.data.AUTOTUNE)
 
     if cache:
         os.makedirs("cache", exist_ok=True)
@@ -346,11 +343,7 @@ def create_tensorflow_dataset(dataframe, image_size, batch_size, shuffle=False, 
         dataset = dataset.cache(cache_path)
 
     if shuffle:
-        dataset = dataset.shuffle(
-            buffer_size=min(len(dataframe), 1000),
-            seed=RAND_ST,
-            reshuffle_each_iteration=True
-        )
+        dataset = dataset.shuffle(buffer_size=min(len(dataframe), 1000), seed=RAND_ST, reshuffle_each_iteration=True)
 
     dataset = dataset.batch(batch_size)
     dataset = dataset.prefetch(tf.data.AUTOTUNE)
@@ -573,18 +566,7 @@ def evaluate_model_original_scale(model, dataframe, image_size, batch_size, targ
         cache_name=cache_name
     )
 
-    """
-    Aby sa neprechadzal cely dataset po batchoch
-    for image_batch, target_batch in dataset:
-        predictions = model.predict(image_batch, verbose=0).reshape(-1)
-
-    y_true_norm.extend(target_batch.numpy().reshape(-1))
-    y_pred_norm.extend(predictions)
-
-    y_true_norm = np.array(y_true_norm, dtype=np.float32)
-    y_pred_norm = np.array(y_pred_norm, dtype=np.float32)
-    """
-
+    # Aby sa neprechadzal cely dataset po batchoch
     predictions = model.predict(dataset, verbose=0)
     y_pred_norm = predictions.reshape(-1)
 
@@ -703,15 +685,7 @@ def plot_training_time_vs_image_size(results_df, title, save_name=None):
     plt.show()
 
 
-
 def create_best_results_by_architecture_and_size(results_df):
-    """
-    For each CNN architecture and each image size, select the best hyperparameter
-    configuration according to the lowest validation MAE in the original scale.
-
-    This table removes duplicate points caused by the hyperparameter grid search.
-    The resulting rows represent the best achieved error for every tested input size.
-    """
     best_indices = results_df.groupby(["architecture", "image_height", "image_width"])["val_mae_original"].idxmin()
 
     best_by_size = results_df.loc[best_indices].copy()
@@ -721,10 +695,6 @@ def create_best_results_by_architecture_and_size(results_df):
 
 
 def create_final_best_image_size_summary(best_by_size_df):
-    """
-    For each architecture, select the image size with the lowest validation MAE.
-    This is the final summary answering which image size is best for each CNN.
-    """
     best_indices = best_by_size_df.groupby("architecture")["val_mae_original"].idxmin()
 
     final_summary = best_by_size_df.loc[best_indices].copy()
@@ -747,10 +717,6 @@ def drop_non_printable_columns(dataframe):
 
 
 def plot_best_metric_vs_image_size(best_by_size_df, metric_name, title, ylabel, save_name=None):
-    """
-    Plot only the best result for every image size and architecture.
-    This avoids plotting all hyperparameter combinations at the same image size.
-    """
     plt.figure(figsize=(10, 6))
 
     architectures = sorted(best_by_size_df["architecture"].unique())
@@ -777,10 +743,6 @@ def plot_best_metric_vs_image_size(best_by_size_df, metric_name, title, ylabel, 
 
 
 def plot_best_training_time_vs_image_size(best_by_size_df, title, save_name=None):
-    """
-    Plot training time of the best hyperparameter configuration for every image
-    size and architecture.
-    """
     plt.figure(figsize=(10, 6))
 
     architectures = sorted(best_by_size_df["architecture"].unique())
@@ -807,9 +769,9 @@ def plot_best_training_time_vs_image_size(best_by_size_df, title, save_name=None
 
 
 def print_final_best_image_size_summary(final_summary_df):
-    print_separator()
+    print_text_separation()
     print("FINAL SUMMARY - BEST IMAGE SIZE FOR EACH CNN ARCHITECTURE")
-    print_separator()
+    print_text_separation()
 
     for _, row in final_summary_df.iterrows():
         print(f"Architecture:      {row['architecture']}")
@@ -825,11 +787,11 @@ def print_final_best_image_size_summary(final_summary_df):
         print(f"Batch size:        {row['batch_size']}")
         print(f"Epochs trained:    {row['epochs_trained']}")
         print(f"Training time (s): {row['training_time_seconds']:.2f}")
-        print_separator("-")
+        print_text_separation("-")
 
 
 #
-# R U N
+# S P U S T E N I E
 #
 check_image_formats(DATASET_NAME)
 analyze_data(DATASET_NAME, (128, 128))
@@ -860,7 +822,7 @@ for images, targets in sample_dataset.take(1):
     print("Images dtype:", images.dtype)
     print("Targets dtype:", targets.dtype)
 
-# EXPERIMENT SETTINGS
+# NASTAVENIA EXPERIMENTOV
 architectures_list = ["small", "medium", "large"]
 
 image_sizes_list = [
@@ -893,9 +855,9 @@ for input_architecture in architectures_list:
                             input_batch_size
                         ))
 
-print_separator()
+print_text_separation()
 print(f"Total number of experiments: {len(all_experiments)}")
-print_separator()
+print_text_separation()
 
 results = []
 
@@ -908,7 +870,7 @@ for experiment_index, experiment in enumerate(all_experiments, start=1):
     batch_size_element = experiment[5]
 
     print("\n")
-    print_separator()
+    print_text_separation()
     print(f"EXPERIMENT {experiment_index} / {len(all_experiments)}")
     print(f"architecture={architecture_name_element}")
     print(f"image_size={image_size_element}")
@@ -916,7 +878,7 @@ for experiment_index, experiment in enumerate(all_experiments, start=1):
     print(f"dropout_rate={dropout_rate_element}")
     print(f"dense_units={dense_units_element}")
     print(f"batch_size={batch_size_element}")
-    print_separator()
+    print_text_separation()
 
     trained_experiment_model = train_cnn_model(
         architecture_name=architecture_name_element,
@@ -1001,14 +963,14 @@ for experiment_index, experiment in enumerate(all_experiments, start=1):
 
 
 #
-# R E S U L T S
+# V Y S L E D K Y
 #
 results_dataframe = pd.DataFrame(results)
 results_printable = results_dataframe.drop(columns=["history", "test_y_true", "test_y_pred"]).sort_values(by="val_mae_original", ascending=True).reset_index(drop=True)
 
-print_separator()
+print_text_separation()
 print("RESULTS TABLE")
-print_separator()
+print_text_separation()
 print(results_printable)
 
 results_save_path = os.path.join(TABLES_DIR, "results.csv")
@@ -1019,7 +981,7 @@ print(f"\nSaved results table: {results_save_path}")
 
 
 #
-# B E S T  M O D E L
+# N A J L E P S I  M O D E L
 #
 best_index = results_dataframe["val_mae_original"].idxmin()
 best_model_row = results_dataframe.loc[best_index]
@@ -1044,9 +1006,9 @@ best_test_rmse_original = best_model_row["test_rmse_original"]
 best_test_y_true = best_model_row["test_y_true"]
 best_test_y_pred = best_model_row["test_y_pred"]
 
-print_separator()
+print_text_separation()
 print("BEST MODEL (based on Validation MAE in original scale)")
-print_separator()
+print_text_separation()
 print(f"architecture       = {best_architecture}")
 print(f"image_size         = {best_image_size_label}")
 print(f"learning_rate      = {best_learning_rate}")
@@ -1059,7 +1021,7 @@ print(f"val_mae_original   = {best_val_mae_original:.4f}")
 print(f"val_rmse_original  = {best_val_rmse_original:.4f}")
 print(f"test_mae_original  = {best_test_mae_original:.4f}")
 print(f"test_rmse_original = {best_test_rmse_original:.4f}")
-print_separator()
+print_text_separation()
 
 best_model_path = os.path.join(MODELS_DIR, "best_model.keras")
 best_model.save(best_model_path)
@@ -1074,24 +1036,21 @@ print(f"Saved best model summary: {best_model_summary_path}")
 
 
 #
-# P L O T S
+# G R A F Y
 #
-# Aggregate results so that every architecture and every image size has only one
-# point: the best hyperparameter configuration according to validation MAE.
 best_by_size_dataframe = create_best_results_by_architecture_and_size(results_dataframe)
 best_by_size_printable = drop_non_printable_columns(best_by_size_dataframe)
 
 best_by_size_save_path = os.path.join(TABLES_DIR, "best_results_by_architecture_and_image_size.csv")
 best_by_size_printable.to_csv(best_by_size_save_path, index=False)
 
-print_separator()
+print_text_separation()
 print("BEST RESULT FOR EACH ARCHITECTURE AND IMAGE SIZE")
-print_separator()
+print_text_separation()
 print(best_by_size_printable)
 print(f"\nSaved best-by-size table: {best_by_size_save_path}")
 
-# Final answer for the assignment: for every CNN architecture, find the image size
-# that achieved the lowest validation error.
+
 final_best_image_size_summary = create_final_best_image_size_summary(best_by_size_dataframe)
 final_best_image_size_summary_printable = drop_non_printable_columns(final_best_image_size_summary)
 
@@ -1104,8 +1063,7 @@ print(f"Saved final best image size summary: {final_summary_save_path}")
 plot_training(best_history, title_prefix=f"{best_architecture} ", save_name="best_model_training_history.png")
 plot_predictions_scatter(best_test_y_true, best_test_y_pred, "Best Model - Test Predictions vs True Irradiance", save_name="best_model_test_predictions_scatter.png")
 
-# Assignment-oriented plots: these show the best achieved error for each image size,
-# not all hyperparameter combinations.
+
 plot_best_metric_vs_image_size(
     best_by_size_printable,
     "val_mae_original",
